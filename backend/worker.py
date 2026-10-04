@@ -1,13 +1,15 @@
-"""后台 worker：用 SKIP LOCKED 认领 pending 记录并写入判定结论。"""
+"""后台 worker：用 SKIP LOCKED 认领 pending 记录并写入判定结论。
+
+入队前主备双通道已对拍一致（见 api.py），worker 只按冻结的两路均值判合格/超差。
+"""
 
 import os
 import time
 from datetime import datetime, timezone
 
 import psycopg
-from psycopg.rows import dict_row
 
-from db import SCHEMA, connect
+from db import MIGRATIONS, SCHEMA, connect
 from rules import judge
 
 POLL_SEC = float(os.environ.get("WORKER_POLL_SEC", "0.5"))
@@ -16,13 +18,14 @@ IDLE_SEC = float(os.environ.get("WORKER_IDLE_SEC", "1.0"))
 
 def ensure_schema(conn):
     conn.execute(SCHEMA)
+    conn.execute(MIGRATIONS)
     conn.commit()
 
 
 def claim_and_process(conn) -> bool:
     with conn.transaction():
         row = conn.execute(
-            """SELECT id, turbine_code, yaw_err_deg
+            """SELECT id, yaw_err_deg
                FROM yaw_logs
                WHERE status = 'pending'
                ORDER BY id
