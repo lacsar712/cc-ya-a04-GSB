@@ -1,11 +1,10 @@
-"""后台 worker：用 SKIP LOCKED 认领 pending 记录并写入判定结论。"""
+"""后台 worker：用 SKIP LOCKED 认领 pending 工单，按主路读数写入判定结论。"""
 
 import os
 import time
 from datetime import datetime, timezone
 
 import psycopg
-from psycopg.rows import dict_row
 
 from db import SCHEMA, connect
 from rules import judge
@@ -22,8 +21,8 @@ def ensure_schema(conn):
 def claim_and_process(conn) -> bool:
     with conn.transaction():
         row = conn.execute(
-            """SELECT id, turbine_code, yaw_err_deg
-               FROM yaw_logs
+            """SELECT id, primary_err_deg
+               FROM yaw_orders
                WHERE status = 'pending'
                ORDER BY id
                FOR UPDATE SKIP LOCKED
@@ -31,10 +30,10 @@ def claim_and_process(conn) -> bool:
         ).fetchone()
         if row is None:
             return False
-        verdict, reason = judge(float(row["yaw_err_deg"]))
+        verdict, reason = judge(float(row["primary_err_deg"]))
         now = datetime.now(timezone.utc)
         conn.execute(
-            """UPDATE yaw_logs
+            """UPDATE yaw_orders
                SET status = 'done', verdict = %s, reason = %s, processed_at = %s
                WHERE id = %s""",
             (verdict, reason, now, row["id"]),
